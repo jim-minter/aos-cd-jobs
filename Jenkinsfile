@@ -1,4 +1,4 @@
-sshkey_dev_preview_int = "test-key"
+sshkey_dev_preview_int = "dev-preview-int"
 sshkey_dev_preview_stg = "test-key"
 sshkey_dev_preview_prod = "test-key"
 
@@ -32,7 +32,34 @@ splitDate(dates.prod_upgrade)
 
 
 while ( true ) {
+
+    echo "  Waiting 30 minutes before next check..."
+
+    def force = false
+    try {
+        timeout( time: 30, unit: 'MINUTES' ) {
+            input message: 'Next assessment will occur in 30 minutes. Forcing action will ignore the disruption window and perform deployment checks immediately.', ok: 'Force Action'
+            force = true
+            last_action_day = 0
+        }
+    } catch (err) {
+        def user = err.getCauses()[0].getUser()
+        if('SYSTEM' == user.toString()) { // SYSTEM means timeout.
+            didTimeout = true
+        } else {
+            throw err
+        }
+    }
+
     def todayFields = getCurrentDateFields()
+
+    if ( force ) {
+        echo "    User has requested immediate action. Ignoring disruption window."
+    } else if ( todayFields[3] != 16 ) {
+        echo "    It is not currently 16:00h. No deployments will be initiated."
+        continue
+    }
+
 
     phase = "dev-preview-int/create"
     if ( isToday( phase, todayFields, dates.int_recreate ) ) {
@@ -62,7 +89,7 @@ while ( true ) {
                 }
 
                 last_action_day = getDayOfYear()
-                status_notify("dev-preview-int has been recreated", "" ) // TODO: URL for dev-preview environment?
+                status_notify("dev-preview-int has been recreated", "Installed: https://console.dev-preview-int.openshift.com" )
                 break
             } catch ( e ) {
                 error_notify("${phase}", "${e}" )
@@ -98,7 +125,7 @@ while ( true ) {
                 }
 
                 last_action_day = getDayOfYear()
-                status_notify("dev-preview-int has been upgraded", "" ) // TODO: URL for dev-preview environment?
+                status_notify("dev-preview-int has been upgraded", "Upgraded: https://console.dev-preview-int.openshift.com" )
                 break
             } catch ( e ) {
                 error_notify("${phase}", "${e}" )
@@ -136,7 +163,7 @@ while ( true ) {
                 }
 
                 last_action_day = getDayOfYear()
-                status_notify("dev-preview-stg has been upgraded", "" ) // TODO: URL for dev-preview environment?
+                status_notify("dev-preview-stg has been upgraded", "Upgraded: https://console.dev-preview-stg.openshift.com" )
                 break
             } catch ( e ) {
                 error_notify("${phase}", "${e}" )
@@ -164,7 +191,7 @@ while ( true ) {
                     //TODO: runTowerOperation( sshkey_dev_preview_prod, 'verify' )
                 }
 
-                status_notify("dev-preview-prod has been upgraded", "" ) // TODO: URL for dev-preview environment?
+                status_notify("dev-preview-prod has been upgraded", "Upgraded: https://console.preview.openshift.com" )
                 break
             } catch ( e ) {
                 error_notify("${phase}", "${e}" )
@@ -177,8 +204,6 @@ while ( true ) {
     }
 
 
-    echo "  Checking for new action to perform in 30 minutes..."
-    sleep( time: 30, unit: 'MINUTES' )
 }
 
 
@@ -283,9 +308,10 @@ def runTowerOperation( sshKeyId, operation ) {
 
 def runOSEBuild() {
     try {
-        node() {
-            echo "Troy's pipeline goes here"
-        }
+        build job: '../aos-cd-builds/build%2Fose',
+            parameters: [   [$class: 'StringParameterValue', name: 'OSE_MAJOR', value: '3'],
+                            [$class: 'StringParameterValue', name: 'OSE_MINOR', value: '5'],
+                        ]
     } catch ( err ) {
         error "Error running openshift/ose build: ${err}"
     }
@@ -297,9 +323,6 @@ def getDayOfYear() {
 
 def status_notify(subject,msg) {
     echo "\n\n\nStaus: ${subject} ; Sending email:\n ${msg}\n\n\n"
-
-    // TODO: re-enable
-    /*
     mail(
             to: "jpierce@redhat.com",
             replyTo: 'jpierce@redhat.com',
@@ -309,14 +332,11 @@ ${msg}
 
 Jenkins job: ${env.BUILD_URL}
 """);
-*/
 }
 
 def error_notify(subject,msg) {
     echo "\n\n\nError: ${subject} ; Sending email:\n ${msg}\n\n\n"
 
-    // TODO: re-enable
-    /*
     mail(
             to: "${mailing_list}",
             replyTo: 'jpierce@redhat.com',
@@ -330,5 +350,4 @@ Job console: ${env.BUILD_URL}/console
 
 Job input: ${env.BUILD_URL}/input
 """);
-*/
 }
